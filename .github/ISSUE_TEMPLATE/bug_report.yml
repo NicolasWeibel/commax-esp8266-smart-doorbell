@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible firmware, hardware, or documentation problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove all credentials, private topic names, device identifiers, IP addresses, and real entrance images before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version or commit
+      placeholder: 0.1.0-stage1 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Build or upload
+        - Boot or diagnostics
+        - Hardware or wiring
+        - Bell detection
+        - Connectivity
+        - Notifications
+        - Camera snapshots
+        - Persistence or time
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: Provide the smallest repeatable sequence.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Hardware and software environment
+      placeholder: Board, ESP8266 core version, Arduino IDE version, wiring, and power source.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Do not include secrets or private identifiers.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy and safety confirmation
+      options:
+        - label: I removed credentials, topic names, device identifiers, private network details, and real entrance images.
+          required: true
