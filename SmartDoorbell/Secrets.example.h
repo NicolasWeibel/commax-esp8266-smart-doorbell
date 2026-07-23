@@ -1,7 +1,7 @@
 #pragma once
 
-// Template for future stages. Stage 1 does not include this file and does not
-// use any credentials. Copy it to Secrets.h only when a later stage requires
+// Template for future stages. Stage 2 does not include Secrets.h and does not
+// use any credentials. Copy this template to Secrets.h only when a later stage requires
 // private configuration. Secrets.h is excluded by .gitignore.
 
 #define WIFI_SSID "YOUR_WIFI_NETWORK"

@@ -4,7 +4,7 @@ The project is developed in hardware-tested stages. The `main` branch should con
 
 ## Stage 1 — Firmware foundation and diagnostics
 
-**Status: complete and hardware-tested**
+**Status: complete, hardware-tested, and released as `v0.1.0-stage1`**
 
 - minimal Arduino entry point;
 - centralized configuration;
@@ -16,25 +16,37 @@ The project is developed in hardware-tested stages. The `main` branch should con
 
 ## Stage 2 — Bell input and pulse detector
 
-- configure D5 with an external 10 kΩ pull-up;
-- capture optocoupler output edges;
-- use a fixed-size interrupt-safe event queue;
+**Status: implementation complete; target hardware validation pending**
+
+- configure D5 with the external 10 kΩ pull-up;
+- capture optocoupler output edges through an interrupt;
+- use a fixed-size ISR-safe raw edge queue;
+- preserve edge timestamps when the main loop is delayed;
 - wait 5 seconds after boot;
-- require 2 seconds of stable LOW before arming;
-- accept HIGH pulses from 80 ms to 15 seconds;
-- classify longer HIGH periods as abnormal;
-- require 500 ms of stable LOW before rearming.
+- require 2 seconds of stable `LOW` before arming;
+- accept `HIGH` pulses from 80 ms through 15 seconds;
+- classify longer `HIGH` periods as abnormal;
+- require 100 ms of stable `LOW` before rearming;
+- monitor an early `HIGH` during rearm and still classify it if it remains active for more than 15 seconds;
+- expose overflow, resynchronization, and pulse counters;
+- validate with direct D5 simulation, PC817, and the real COMMAX intercom.
 
-## Stage 3 — Bell sessions
+## Stage 3 — Complete connected smart doorbell
 
-- first notification session;
+**Status: planned after Stage 2 approval**
+
+Stage 3 will combine all remaining functionality in one development branch and one final release. It will still be implemented through focused modules and commits.
+
+### Bell sessions
+
+- first-notification session;
 - cumulative bell counter;
-- counter update check every 10 seconds;
+- notification counter checks every 10 seconds;
 - one-minute first-notification window;
 - separate maximum-priority insistence notification;
 - session reset after two minutes without a valid bell event.
 
-## Stage 4 — Time and persistent offline state
+### Time and persistence
 
 - extended monotonic clock;
 - NTP time anchor;
@@ -43,30 +55,35 @@ The project is developed in hardware-tested stages. The `main` branch should con
 - recovery after reset or power interruption;
 - exact, reconstructed, lower-bound, or unavailable event time states.
 
-## Stage 5 — ntfy text notifications and connectivity
+### Wi-Fi, ntfy, and offline mode
 
-- text notifications;
+- Wi-Fi reconnection;
+- text and image notifications;
 - notification replacement by stable sequence identifier;
 - high and maximum priority channels;
 - connectivity state machine;
-- offline confirmation after repeated failures;
-- delayed offline summary after connectivity recovery.
+- offline confirmation after repeated failures over approximately 30 seconds;
+- active-session removal when offline is confirmed;
+- persistent offline bell count;
+- delayed summary after connectivity recovery.
 
-## Stage 6 — Imou snapshots
+### Imou snapshots
 
-- access-token acquisition and renewal;
+- access-token acquisition, caching, and renewal;
 - enhanced snapshot request;
-- measured snapshot availability delay;
-- file download to LittleFS;
+- measured initial availability delay;
 - text-first fallback when an image is delayed;
+- download to LittleFS without buffering the full JPG in RAM;
 - standard snapshot fallback for invalid enhanced URLs;
-- camera-offline and API error handling.
+- camera-offline, temporary API, and quota error handling;
+- image attachment reuse for later counter updates.
 
-## Stage 7 — Full integration and secure TLS
+### Secure integration
 
-- network job scheduler;
 - one HTTPS operation at a time;
-- secure certificate validation;
-- notification image attachment reuse;
-- end-to-end session and offline tests;
-- long-duration stability and memory testing.
+- network job scheduling around notification deadlines;
+- TLS certificate verification;
+- continued interrupt-based D5 capture during network operations;
+- full session, camera-failure, offline, reset, and recovery tests;
+- 48 to 72-hour final stability validation;
+- release as `v1.0.0` after complete hardware approval.
