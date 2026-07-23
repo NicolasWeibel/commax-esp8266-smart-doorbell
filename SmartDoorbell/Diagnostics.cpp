@@ -24,14 +24,14 @@ void Diagnostics::begin() {
   printBootReport();
 
   lifecycleState_ = AppLifecycleState::Running;
-  log(LogLevel::Info, F("Stage 1 initialization completed."));
+  log(LogLevel::Info, F("Diagnostics initialized."));
 
   lastHeartbeatMs_ = millis();
   lastDetailedMemoryMs_ = millis();
-  startStatusLedPulse(millis());
+  startStatusLedPulse(millis(), AppConfig::kHeartbeatLedPulseMs);
 }
 
-void Diagnostics::tick() {
+void Diagnostics::tick(const BellDetectorStatus& bellStatus) {
   const uint32_t nowMs = millis();
 
   ++stats_.loopCount;
@@ -41,11 +41,11 @@ void Diagnostics::tick() {
   if (static_cast<uint32_t>(nowMs - lastHeartbeatMs_) >=
       AppConfig::kHeartbeatIntervalMs) {
     lastHeartbeatMs_ = nowMs;
-    printHeartbeat(nowMs);
+    printHeartbeat(nowMs, bellStatus);
     checkMemoryWarnings();
 
     if (AppConfig::kEnableHeartbeatLed) {
-      startStatusLedPulse(nowMs);
+      startStatusLedPulse(nowMs, AppConfig::kHeartbeatLedPulseMs);
     }
   }
 
@@ -53,6 +53,7 @@ void Diagnostics::tick() {
       AppConfig::kDetailedMemoryIntervalMs) {
     lastDetailedMemoryMs_ = nowMs;
     printDetailedMemoryReport();
+    printBellStatus(bellStatus);
   }
 }
 
@@ -87,6 +88,72 @@ void Diagnostics::log(LogLevel level, const char* message) const {
   Serial.println(message);
 }
 
+void Diagnostics::logBellEvent(const BellEvent& event) const {
+  switch (event.type) {
+    case BellEventType::BootWaitFinished:
+      Serial.print(F("[INFO] DETECTOR | boot_wait_finished | D5="));
+      Serial.print(inputLevelText(event.value != 0U));
+      Serial.print(F(" | waiting_for_stable_LOW="));
+      Serial.print(AppConfig::kArmLowStableMs);
+      Serial.println(F("ms"));
+      break;
+
+    case BellEventType::Armed:
+      Serial.print(F("[INFO] DETECTOR | ARMED | D5=LOW | valid_presses="));
+      Serial.println(event.value);
+      break;
+
+    case BellEventType::PulseStarted:
+      Serial.println(F("[INFO] BELL | pulse_started | LOW->HIGH"));
+      break;
+
+    case BellEventType::ValidPress:
+      Serial.print(F("[INFO] BELL | VALID | duration="));
+      Serial.print(event.pulseDurationUs / 1000U);
+      Serial.print(F("ms | total="));
+      Serial.println(event.value);
+      break;
+
+    case BellEventType::ShortPulseIgnored:
+      Serial.print(F("[INFO] BELL | SHORT_IGNORED | duration_us="));
+      Serial.print(event.pulseDurationUs);
+      Serial.print(F(" | threshold_us="));
+      Serial.print(AppConfig::kMinimumBellHighMs * 1000UL);
+      Serial.print(F(" | ignored_total="));
+      Serial.println(event.value);
+      break;
+
+    case BellEventType::HighTooLong:
+      Serial.print(F("[WARN] SIGNAL | HIGH_TOO_LONG | duration="));
+      Serial.print(event.pulseDurationUs / 1000U);
+      Serial.print(F("ms | limit="));
+      Serial.print(AppConfig::kMaximumBellHighMs);
+      Serial.print(F("ms | total="));
+      Serial.println(event.value);
+      break;
+
+    case BellEventType::RecoveredFromHigh:
+      Serial.print(F("[INFO] SIGNAL | returned_to_LOW | high_duration="));
+      Serial.print(event.pulseDurationUs / 1000U);
+      Serial.println(F("ms | waiting_for_rearm"));
+      break;
+
+    case BellEventType::RawQueueOverflow:
+      Serial.print(F("[WARN] INPUT | raw_edge_queue_full | dropped="));
+      Serial.println(event.value);
+      break;
+
+    case BellEventType::InputResynchronized:
+      Serial.print(F("[WARN] INPUT | resynchronized | physical_level="));
+      Serial.println(inputLevelText(event.value != 0U));
+      break;
+  }
+}
+
+void Diagnostics::pulseStatusLed(uint32_t durationMs) {
+  startStatusLedPulse(millis(), durationMs);
+}
+
 void Diagnostics::configureStatusLed() {
   pinMode(AppConfig::kStatusLedPin, OUTPUT);
   setStatusLed(false);
@@ -98,9 +165,21 @@ void Diagnostics::setStatusLed(bool enabled) {
   digitalWrite(AppConfig::kStatusLedPin, outputHigh ? HIGH : LOW);
 }
 
-void Diagnostics::startStatusLedPulse(uint32_t nowMs) {
+void Diagnostics::startStatusLedPulse(uint32_t nowMs,
+                                      uint32_t durationMs) {
+  if (ledPulseActive_) {
+    const uint32_t elapsed = nowMs - ledPulseStartedMs_;
+    const uint32_t remaining =
+        elapsed < ledPulseDurationMs_ ? ledPulseDurationMs_ - elapsed : 0U;
+
+    if (remaining > durationMs) {
+      durationMs = remaining;
+    }
+  }
+
   setStatusLed(true);
   ledPulseStartedMs_ = nowMs;
+  ledPulseDurationMs_ = durationMs;
   ledPulseActive_ = true;
 }
 
@@ -110,7 +189,7 @@ void Diagnostics::updateStatusLed(uint32_t nowMs) {
   }
 
   if (static_cast<uint32_t>(nowMs - ledPulseStartedMs_) >=
-      AppConfig::kStatusLedPulseMs) {
+      ledPulseDurationMs_) {
     setStatusLed(false);
     ledPulseActive_ = false;
   }
@@ -136,7 +215,7 @@ void Diagnostics::printBootReport() {
 
   Serial.print(F("Firmware: "));
   Serial.print(AppConfig::kFirmwareName);
-  Serial.print(F(" "));
+  Serial.print(' ');
   Serial.println(AppConfig::kFirmwareVersion);
 
   Serial.print(F("Implementation: "));
@@ -174,13 +253,29 @@ void Diagnostics::printBootReport() {
 
   printDetailedMemoryReport();
 
-  Serial.println(F("D5 is not configured in this stage."));
+  Serial.println(F("Bell input: D5/GPIO14 with external 10 kOhm pull-up."));
+  Serial.println(F("Signal logic: idle=LOW, active=HIGH, event on return to LOW."));
+  Serial.print(F("Arming: "));
+  Serial.print(AppConfig::kBootWaitMs);
+  Serial.print(F("ms startup wait + "));
+  Serial.print(AppConfig::kArmLowStableMs);
+  Serial.println(F("ms stable LOW."));
+  Serial.print(F("Valid HIGH pulse: "));
+  Serial.print(AppConfig::kMinimumBellHighMs);
+  Serial.print(F("ms to "));
+  Serial.print(AppConfig::kMaximumBellHighMs);
+  Serial.println(F("ms."));
+  Serial.print(F("Rearm: "));
+  Serial.print(AppConfig::kRearmLowStableMs);
+  Serial.println(F("ms stable LOW."));
   Serial.println(F("Wi-Fi, LittleFS, Imou, and ntfy are not active yet."));
   Serial.println(F("=================================================="));
   Serial.println();
 }
 
-void Diagnostics::printHeartbeat(uint32_t nowMs) {
+void Diagnostics::printHeartbeat(
+    uint32_t nowMs,
+    const BellDetectorStatus& bellStatus) {
   Serial.print(F("[INFO] HEARTBEAT | uptime="));
   Serial.print(nowMs / 1000U);
   Serial.print(F("s | heap="));
@@ -190,7 +285,13 @@ void Diagnostics::printHeartbeat(uint32_t nowMs) {
   Serial.print(F(" B | fragmentation="));
   Serial.print(stats_.heapFragmentationPercent);
   Serial.print(F("% | loops="));
-  Serial.println(stats_.loopCount);
+  Serial.print(stats_.loopCount);
+  Serial.print(F(" | detector="));
+  Serial.print(bellStateText(bellStatus.state));
+  Serial.print(F(" | D5="));
+  Serial.print(inputLevelText(bellStatus.currentLevelHigh));
+  Serial.print(F(" | valid_bells="));
+  Serial.println(bellStatus.stats.validPresses);
 }
 
 void Diagnostics::printDetailedMemoryReport() {
@@ -205,9 +306,33 @@ void Diagnostics::printDetailedMemoryReport() {
   Serial.println(F(" B"));
 }
 
+void Diagnostics::printBellStatus(
+    const BellDetectorStatus& bellStatus) const {
+  Serial.print(F("[INFO] DETECTOR_STATUS | state="));
+  Serial.print(bellStateText(bellStatus.state));
+  Serial.print(F(" | D5="));
+  Serial.print(inputLevelText(bellStatus.currentLevelHigh));
+  Serial.print(F(" | pending_edges="));
+  Serial.print(bellStatus.pendingRawEdges);
+  Serial.print(F(" | raw_edges="));
+  Serial.print(bellStatus.stats.rawEdges);
+  Serial.print(F(" | valid="));
+  Serial.print(bellStatus.stats.validPresses);
+  Serial.print(F(" | short="));
+  Serial.print(bellStatus.stats.shortPulsesIgnored);
+  Serial.print(F(" | long_high="));
+  Serial.print(bellStatus.stats.highTooLongEvents);
+  Serial.print(F(" | dropped_edges="));
+  Serial.print(bellStatus.stats.rawEdgesDropped);
+  Serial.print(F(" | dropped_events="));
+  Serial.print(bellStatus.stats.detectorEventsDropped);
+  Serial.print(F(" | resyncs="));
+  Serial.println(bellStatus.stats.inputResynchronizations);
+}
+
 void Diagnostics::checkMemoryWarnings() {
   if (stats_.freeHeapBytes < AppConfig::kHeapWarningBytes) {
-    log(LogLevel::Warning, F("Free heap dropped below the configured threshold."));
+    log(LogLevel::Warning, F("Free heap is below the configured threshold."));
   }
 
   if (stats_.heapFragmentationPercent >
@@ -235,4 +360,31 @@ const __FlashStringHelper* Diagnostics::levelText(LogLevel level) const {
     default:
       return F("LOG");
   }
+}
+
+const __FlashStringHelper* Diagnostics::bellStateText(
+    BellDetectorState state) const {
+  switch (state) {
+    case BellDetectorState::BootWait:
+      return F("BOOT_WAIT");
+    case BellDetectorState::WaitingForStableLow:
+      return F("WAITING_FOR_LOW");
+    case BellDetectorState::Armed:
+      return F("ARMED");
+    case BellDetectorState::HighInProgress:
+      return F("HIGH_IN_PROGRESS");
+    case BellDetectorState::HighDuringRearm:
+      return F("HIGH_DURING_REARM");
+    case BellDetectorState::HighTooLong:
+      return F("HIGH_TOO_LONG");
+    case BellDetectorState::WaitingForRearm:
+      return F("WAITING_FOR_REARM");
+    default:
+      return F("UNKNOWN");
+  }
+}
+
+const __FlashStringHelper* Diagnostics::inputLevelText(
+    bool levelHigh) const {
+  return levelHigh ? F("HIGH") : F("LOW");
 }
