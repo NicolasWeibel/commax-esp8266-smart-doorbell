@@ -1,36 +1,45 @@
+param(
+  [string]$Compiler = "g++",
+  [string[]]$CompilerArguments = @()
+)
+
 $ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$Build = Join-Path $Root "tests\host\build"
+New-Item -ItemType Directory -Force -Path $Build | Out-Null
+$Output = Join-Path $Build "doorbell_logic_tests.exe"
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$rootDir = Resolve-Path (Join-Path $scriptDir "..\..")
-$buildDir = Join-Path $scriptDir "build"
-
-New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
-
-$compiler = Get-Command g++ -ErrorAction SilentlyContinue
-if (-not $compiler) {
-    throw "g++ was not found. Install a C++ compiler or run these tests in a CI environment."
+& $Compiler @CompilerArguments -std=gnu++17 -Wall -Wextra -Werror `
+  -I"$Root\tests\host" `
+  -I"$Root\SmartDoorbell" `
+  "$Root\tests\host\DoorbellLogicTests.cpp" `
+  "$Root\SmartDoorbell\SessionManager.cpp" `
+  "$Root\SmartDoorbell\DeliveryManager.cpp" `
+  "$Root\SmartDoorbell\ConnectivityManager.cpp" `
+  "$Root\SmartDoorbell\OfflineSummaryManager.cpp" `
+  "$Root\SmartDoorbell\BellDetector.cpp" `
+  -o $Output
+if ($LASTEXITCODE -ne 0) {
+  throw "Host test compilation failed (exit $LASTEXITCODE)."
 }
 
-$output = Join-Path $buildDir "bell_detector_tests.exe"
-
-& $compiler.Source `
-    -std=c++11 `
-    -Wall `
-    -Wextra `
-    -Wpedantic `
-    "-I$scriptDir" `
-    "-I$(Join-Path $rootDir 'SmartDoorbell')" `
-    (Join-Path $scriptDir "FakeArduino.cpp") `
-    (Join-Path $rootDir "SmartDoorbell\BellDetector.cpp") `
-    (Join-Path $scriptDir "BellDetectorTests.cpp") `
-    -o $output
-
+& $Output
 if ($LASTEXITCODE -ne 0) {
-    throw "Host test compilation failed."
+  throw "Host logic tests failed (exit $LASTEXITCODE)."
 }
 
-& $output
+$MessagesOutput = Join-Path $Build "message_formatter_tests.exe"
+& $Compiler @CompilerArguments -std=gnu++17 -Wall -Wextra -Werror `
+  -I"$Root\tests\host" `
+  -I"$Root\SmartDoorbell" `
+  "$Root\tests\host\MessageFormatterTests.cpp" `
+  "$Root\SmartDoorbell\MessageFormatter.cpp" `
+  "$Root\SmartDoorbell\OfflineSummaryManager.cpp" `
+  -o $MessagesOutput
 if ($LASTEXITCODE -ne 0) {
-    throw "One or more BellDetector host tests failed."
+  throw "Message test compilation failed (exit $LASTEXITCODE)."
+}
+& $MessagesOutput
+if ($LASTEXITCODE -ne 0) {
+  throw "Message tests failed (exit $LASTEXITCODE)."
 }

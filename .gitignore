@@ -7,7 +7,7 @@
 !.env.example
 
 # -----------------------------------------------------------------------------
-# Local-only documentation included in the downloadable ZIP
+# Local setup guides, personal reports, and archived release-preparation notes
 # -----------------------------------------------------------------------------
 /local-guides/
 
@@ -36,8 +36,6 @@ platformio.ini.local
 **/offline.bin
 **/offline.bak
 **/offline.tmp
-**/snap.jpg
-**/snap.part
 
 # -----------------------------------------------------------------------------
 # Private test artifacts
@@ -77,3 +75,10 @@ desktop.ini
 *.o
 *.obj
 *.exe
+
+# Generated TLS certificate store (created locally and uploaded to LittleFS)
+/SmartDoorbell/data/certs.ar
+/SmartDoorbell/data/certs.idx
+**/doorbell-v3.bin
+**/doorbell-v3.bak
+**/doorbell-v3.tmp

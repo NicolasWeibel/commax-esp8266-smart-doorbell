@@ -1,22 +1,29 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
-BUILD_DIR="$SCRIPT_DIR/build"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+BUILD="$ROOT/tests/host/build"
+mkdir -p "$BUILD"
 
-mkdir -p "$BUILD_DIR"
+g++ -std=gnu++17 -Wall -Wextra -Werror \
+  -I"$ROOT/tests/host" \
+  -I"$ROOT/SmartDoorbell" \
+  "$ROOT/tests/host/DoorbellLogicTests.cpp" \
+  "$ROOT/SmartDoorbell/SessionManager.cpp" \
+  "$ROOT/SmartDoorbell/DeliveryManager.cpp" \
+  "$ROOT/SmartDoorbell/ConnectivityManager.cpp" \
+  "$ROOT/SmartDoorbell/OfflineSummaryManager.cpp" \
+  "$ROOT/SmartDoorbell/BellDetector.cpp" \
+  -o "$BUILD/doorbell_logic_tests"
 
-c++ \
-  -std=c++11 \
-  -Wall \
-  -Wextra \
-  -Wpedantic \
-  -I"$SCRIPT_DIR" \
-  -I"$ROOT_DIR/SmartDoorbell" \
-  "$SCRIPT_DIR/FakeArduino.cpp" \
-  "$ROOT_DIR/SmartDoorbell/BellDetector.cpp" \
-  "$SCRIPT_DIR/BellDetectorTests.cpp" \
-  -o "$BUILD_DIR/bell_detector_tests"
+"$BUILD/doorbell_logic_tests"
 
-"$BUILD_DIR/bell_detector_tests"
+g++ -std=gnu++17 -Wall -Wextra -Werror \
+  -I"$ROOT/tests/host" \
+  -I"$ROOT/SmartDoorbell" \
+  "$ROOT/tests/host/MessageFormatterTests.cpp" \
+  "$ROOT/SmartDoorbell/MessageFormatter.cpp" \
+  "$ROOT/SmartDoorbell/OfflineSummaryManager.cpp" \
+  -o "$BUILD/message_formatter_tests"
+
+"$BUILD/message_formatter_tests"

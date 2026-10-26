@@ -1,17 +1,23 @@
 #pragma once
 
-// Template for future stages. Stage 2 does not include Secrets.h and does not
-// use any credentials. Copy this template to Secrets.h only when a later stage requires
-// private configuration. Secrets.h is excluded by .gitignore.
+// Copy this file to Secrets.h and replace every placeholder.
+// Secrets.h is intentionally ignored by Git.
+namespace Secrets {
 
-#define WIFI_SSID "YOUR_WIFI_NETWORK"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+constexpr char kWifiSsid[] = "YOUR_WIFI_SSID";
+constexpr char kWifiPassword[] = "YOUR_WIFI_PASSWORD";
+constexpr char kWifiHostname[] = "commax-smart-doorbell";
 
-#define NTFY_SERVER "https://ntfy.sh"
-#define NTFY_TOPIC "YOUR_PRIVATE_TOPIC"
+constexpr char kNtfyBaseUrl[] = "https://ntfy.sh";
+constexpr char kNtfyTopic[] = "YOUR_PRIVATE_RANDOM_TOPIC";
 
-#define IMOU_APP_ID "YOUR_APP_ID"
-#define IMOU_APP_SECRET "YOUR_APP_SECRET"
-#define IMOU_REGION "or"
-#define IMOU_DEVICE_ID "YOUR_DEVICE_ID"
-#define IMOU_CHANNEL_ID "0"
+// Optional static deep-link/action. They do not call the Imou API and do not
+// download an image. Empty strings disable the corresponding ntfy header.
+constexpr char kNtfyClickUrl[] = "imoulife://open.webview";
+constexpr char kNtfyAction[] =
+    "view, Abrir Imou, imoulife://open.webview";
+
+// Argentina: ART3. This is UTC-3 all year.
+constexpr char kTimeZone[] = "ART3";
+
+}  // namespace Secrets

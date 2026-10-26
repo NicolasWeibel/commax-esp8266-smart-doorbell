@@ -12,6 +12,7 @@ void BellDetector::begin() {
   bootStartedMs_ = millis();
   stopLowStableTracking();
   highStartedUs_ = 0;
+  highTimingReliable_ = false;
 
   instance_ = this;
   attachInterrupt(digitalPinToInterrupt(AppConfig::kBellInputPin),
@@ -23,9 +24,15 @@ void BellDetector::tick() {
   const uint32_t nowMs = millis();
 
   const uint32_t dropped = rawEdgeQueue_.takeDroppedCount();
+  const bool edgeTimingReliable = dropped == 0U;
   if (dropped > 0U) {
     stats_.rawEdgesDropped += dropped;
     emitEvent(BellEventType::RawQueueOverflow, nowMs, 0, dropped);
+    if (state_ == BellDetectorState::HighInProgress ||
+        state_ == BellDetectorState::HighDuringRearm ||
+        state_ == BellDetectorState::HighTooLong) {
+      highTimingReliable_ = false;
+    }
   }
 
   EdgeEvent edge{};
@@ -38,7 +45,7 @@ void BellDetector::tick() {
     const uint32_t processedAtUs = micros();
     const uint32_t ageUs = processedAtUs - edge.timestampUs;
     const uint32_t edgeOccurredAtMs = nowMs - (ageUs / 1000U);
-    processEdge(edge, edgeOccurredAtMs);
+    processEdge(edge, edgeOccurredAtMs, edgeTimingReliable);
   }
 
   // Safety net: if an edge was lost, restore the logical state from the actual
@@ -57,7 +64,7 @@ void BellDetector::tick() {
     EdgeEvent syntheticEdge{};
     syntheticEdge.timestampUs = micros();
     syntheticEdge.levelHigh = physicalLevelHigh;
-    processEdge(syntheticEdge, nowMs);
+    processEdge(syntheticEdge, nowMs, false);
   }
 
   updateTimedTransitions(nowMs, micros());
@@ -83,6 +90,15 @@ BellDetectorStatus BellDetector::status() const {
   return result;
 }
 
+bool BellDetector::activityInFlight() const {
+  if (rawEdgeQueue_.size() > 0U || currentLevelHigh_) {
+    return true;
+  }
+  return state_ == BellDetectorState::HighInProgress ||
+         state_ == BellDetectorState::HighDuringRearm ||
+         state_ == BellDetectorState::HighTooLong;
+}
+
 void IRAM_ATTR BellDetector::interruptThunk() {
   if (instance_ != nullptr) {
     instance_->captureEdgeFromIsr();
@@ -95,7 +111,8 @@ void IRAM_ATTR BellDetector::captureEdgeFromIsr() {
 }
 
 void BellDetector::processEdge(const EdgeEvent& edge,
-                               uint32_t edgeOccurredAtMs) {
+                               uint32_t edgeOccurredAtMs,
+                               bool timingReliable) {
   // CHANGE should not normally deliver duplicate levels, but ignoring them
   // makes the detector robust to repeated or synthetic synchronization events.
   if (edge.levelHigh == currentLevelHigh_) {
@@ -119,32 +136,44 @@ void BellDetector::processEdge(const EdgeEvent& edge,
 
     case BellDetectorState::Armed:
       if (isActiveLevel()) {
-        startEligibleHighPulse(edge, edgeOccurredAtMs);
+        startEligibleHighPulse(edge, edgeOccurredAtMs, timingReliable);
       }
       break;
 
     case BellDetectorState::HighInProgress:
       if (isRestingLevel()) {
-        const uint32_t durationUs = edge.timestampUs - highStartedUs_;
-        finishHighPulse(durationUs, edgeOccurredAtMs);
+        if (!highTimingReliable_) {
+          discardUnreliableHigh(edgeOccurredAtMs);
+        } else {
+          const uint32_t durationUs = edge.timestampUs - highStartedUs_;
+          finishHighPulse(durationUs, edgeOccurredAtMs);
+        }
       }
       break;
 
     case BellDetectorState::HighDuringRearm:
       if (isRestingLevel()) {
-        const uint32_t durationUs = edge.timestampUs - highStartedUs_;
-        finishHighDuringRearm(durationUs, edgeOccurredAtMs);
+        if (!highTimingReliable_) {
+          discardUnreliableHigh(edgeOccurredAtMs);
+        } else {
+          const uint32_t durationUs = edge.timestampUs - highStartedUs_;
+          finishHighDuringRearm(durationUs, edgeOccurredAtMs);
+        }
       }
       break;
 
     case BellDetectorState::HighTooLong:
       if (isRestingLevel()) {
-        const uint32_t durationUs = edge.timestampUs - highStartedUs_;
-        emitEvent(BellEventType::RecoveredFromHigh,
-                  edgeOccurredAtMs,
-                  durationUs,
-                  stats_.highTooLongEvents);
-        enterWaitingForRearm(edgeOccurredAtMs);
+        if (!highTimingReliable_) {
+          discardUnreliableHigh(edgeOccurredAtMs);
+        } else {
+          const uint32_t durationUs = edge.timestampUs - highStartedUs_;
+          emitEvent(BellEventType::RecoveredFromHigh,
+                    edgeOccurredAtMs,
+                    durationUs,
+                    stats_.highTooLongEvents);
+          enterWaitingForRearm(edgeOccurredAtMs);
+        }
       }
       break;
 
@@ -155,11 +184,11 @@ void BellDetector::processEdge(const EdgeEvent& edge,
         // The main loop may not have run at the exact 100 ms boundary. Use the
         // edge occurrence timestamp so a valid fast second press is not lost.
         arm(edgeOccurredAtMs);
-        startEligibleHighPulse(edge, edgeOccurredAtMs);
+        startEligibleHighPulse(edge, edgeOccurredAtMs, timingReliable);
       } else {
         // LOW did not remain stable long enough to distinguish a new press from
         // contact bounce or continuation of the previous electrical event.
-        startHighDuringRearm(edge);
+        startHighDuringRearm(edge, timingReliable);
       }
       break;
   }
@@ -188,7 +217,7 @@ void BellDetector::updateTimedTransitions(uint32_t nowMs, uint32_t nowUs) {
 
     case BellDetectorState::HighInProgress:
     case BellDetectorState::HighDuringRearm:
-      if (isActiveLevel() &&
+      if (isActiveLevel() && highTimingReliable_ &&
           (nowUs - highStartedUs_) >
               (AppConfig::kMaximumBellHighMs * 1000UL)) {
         reportHighTooLong(nowMs, nowUs - highStartedUs_);
@@ -210,15 +239,19 @@ void BellDetector::updateTimedTransitions(uint32_t nowMs, uint32_t nowUs) {
 }
 
 void BellDetector::startEligibleHighPulse(const EdgeEvent& edge,
-                                          uint32_t edgeOccurredAtMs) {
+                                          uint32_t edgeOccurredAtMs,
+                                          bool timingReliable) {
   highStartedUs_ = edge.timestampUs;
+  highTimingReliable_ = timingReliable;
   state_ = BellDetectorState::HighInProgress;
   stopLowStableTracking();
   emitEvent(BellEventType::PulseStarted, edgeOccurredAtMs);
 }
 
-void BellDetector::startHighDuringRearm(const EdgeEvent& edge) {
+void BellDetector::startHighDuringRearm(const EdgeEvent& edge,
+                                           bool timingReliable) {
   highStartedUs_ = edge.timestampUs;
+  highTimingReliable_ = timingReliable;
   state_ = BellDetectorState::HighDuringRearm;
   stopLowStableTracking();
 }
@@ -281,8 +314,19 @@ void BellDetector::reportHighTooLong(uint32_t occurredAtMs,
             stats_.highTooLongEvents);
 }
 
+void BellDetector::discardUnreliableHigh(uint32_t occurredAtMs) {
+  // A queue overflow or synthetic resynchronization means the exact rising
+  // timestamp is no longer trustworthy. Never turn unsigned underflow into a
+  // false multi-day HIGH_TOO_LONG report and never count that pulse as valid.
+  highStartedUs_ = 0;
+  highTimingReliable_ = false;
+  enterWaitingForRearm(occurredAtMs);
+}
+
 void BellDetector::enterWaitingForStableLow(uint32_t nowMs) {
   state_ = BellDetectorState::WaitingForStableLow;
+  highTimingReliable_ = false;
+  highStartedUs_ = 0;
 
   if (isRestingLevel()) {
     startLowStableTracking(nowMs);
@@ -293,6 +337,8 @@ void BellDetector::enterWaitingForStableLow(uint32_t nowMs) {
 
 void BellDetector::enterWaitingForRearm(uint32_t nowMs) {
   state_ = BellDetectorState::WaitingForRearm;
+  highTimingReliable_ = false;
+  highStartedUs_ = 0;
 
   if (isRestingLevel()) {
     startLowStableTracking(nowMs);
@@ -313,6 +359,8 @@ void BellDetector::stopLowStableTracking() {
 
 void BellDetector::arm(uint32_t nowMs) {
   state_ = BellDetectorState::Armed;
+  highTimingReliable_ = false;
+  highStartedUs_ = 0;
   stopLowStableTracking();
   emitEvent(BellEventType::Armed, nowMs, 0, stats_.validPresses);
 }

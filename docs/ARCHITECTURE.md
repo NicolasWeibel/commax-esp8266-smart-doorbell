@@ -1,175 +1,87 @@
 # Architecture
 
-## Stage 2 objective
+## Input and main loop
 
-Stage 2 adds reliable electrical bell detection without introducing networking, filesystem access, or dynamic allocation in the timing-sensitive path. The detector must continue to work correctly when later stages add HTTPS operations that may temporarily delay the main loop.
-
-## Signal model
-
-The PC817 output is connected to D5/GPIO14 with an external 10 kΩ pull-up to 3V3.
+The PC817 output drives D5/GPIO14 with an external 10 kOhm pull-up. Idle is LOW;
+a valid HIGH pulse is confirmed when it returns to LOW. Startup, pulse-duration
+and rearm checks run in `BellDetector`, outside the ISR.
 
 ```text
-Idle intercom line  -> optocoupler conducts -> D5 LOW
-Bell line active    -> optocoupler releases -> D5 HIGH
+D5 interrupt -> fixed raw-edge queue -> BellDetector -> valid bell event
+                                                         |
+                          +------------------------------+-----------------+
+                          |                                                |
+                   ONLINE / DEGRADED                                OFFLINE / RECOVERING
+                          |                                                |
+                   SessionManager                                 OfflineSummaryManager
+                          |                                                |
+                   DeliveryManager --------------------------------> NtfyClient
 ```
 
-A valid bell event is confirmed only when the signal returns to `LOW`, because that transition provides the complete pulse duration. Two presses are treated as distinct only when at least 100 ms of continuous `LOW` separates them.
+The ISR captures only the level and microsecond timestamp. It does not allocate
+memory, log, access LittleFS or perform network work. The raw queue has 64 slots;
+the high-level event queue has 128, so a raw batch can emit diagnostic events
+without crowding valid presses out of that batch. Ring buffers reserve one slot.
+The queues remain finite and expose overflow/resynchronization diagnostics.
 
-## Design principles
+`SmartDoorbell.ino` services the input before and after controller/network work.
+HTTPS operations are sequential and use cooperative input pumping where supported.
+The ISR continues to capture edges while the main loop is delayed; this is not
+a guarantee against loss under an arbitrarily large input burst.
 
-- Keep the Arduino entry point small.
-- Capture D5 transitions in a minimal ISR.
-- Perform no serial, network, filesystem, JSON, or dynamic-memory work in the ISR.
-- Preserve edge timestamps even if the main loop is temporarily delayed.
-- Use fixed-capacity queues and explicit overflow counters.
-- Use unsigned elapsed-time comparisons to tolerate timer rollover.
-- Require a known, stable idle state before arming.
-- Never classify a long disconnected or unavailable signal as a bell event.
-- Keep detection independent from future Wi-Fi, notification, and camera failures.
+## Sessions and delivery
 
-## Firmware modules
+`SessionManager` maintains the initial 60-second window, cumulative count,
+insistence phase and 120-second silence deadline. Restored events can precede the
+current boot, so deadlines are reconstructed from their remaining time rather
+than from an unsigned subtraction that underflows the new uptime.
 
-### `SmartDoorbell.ino`
+`DeliveryManager` schedules initial notifications, quiet count updates and retries.
+It tracks desired and confirmed counts separately. When connectivity is lost,
+only unreported presses are transferred to the recovery summary. An insistence
+notification inherits the confirmed baseline from the first notification.
 
-Arduino entry point. It initializes diagnostics and bell detection, drains high-level bell events, and gives detector processing priority in each loop iteration.
+## Connectivity and offline recovery
 
-### `AppConfig.h`
+`ConnectivityManager` exposes WAITING_FOR_TIME, ONLINE, DEGRADED, OFFLINE and
+RECOVERING. Offline declaration considers Wi-Fi loss, repeated publication
+failures, failure duration and missing time, with startup grace for normal DHCP.
+The current thresholds are centralized in `AppConfig.h`.
 
-Central compile-time configuration:
+`OfflineSummaryManager` stores total undelivered presses, distinct occasions and
+the best available last-event timestamp. Recovery publishes one summary. If input
+is still active or the count changes during publication, completion is deferred
+or the same recovery notification is updated. This is a best-effort input guard;
+extreme bounce can still make a concurrent press appear as a separate notification.
 
-- firmware identity;
-- serial and diagnostic intervals;
-- D5 pin and signal polarity;
-- startup, pulse, and rearm timing;
-- fixed queue capacities;
-- LED behavior;
-- memory-warning thresholds.
+`WifiOutageAggregator` combines repeated NO_AP_FOUND events into an initial event,
+periodic summaries and a final recovery summary. It is diagnostic state and is not
+part of persistent bell counts.
 
-### `AppTypes.h`
+## Time and message formatting
 
-Shared types:
+`MonotonicClock` extends uptime beyond the 32-bit hardware timer rollover.
+`TimeKeeper` configures the private POSIX timezone and maintains an NTP epoch anchor.
+`MessageFormatter` uses the recorded last-event time, not the send time, and compares
+local calendar dates to choose a time, yesterday, or an explicit date/year.
 
-- logging and application lifecycle;
-- detector states;
-- raw edge events;
-- high-level bell events;
-- detector statistics and status;
-- runtime memory statistics.
+For offline events with a validated relative age from the same boot, the formatter
+reconstructs the displayed epoch without modifying saved state. An invalidated
+timestamp after restart produces an explicit unknown-time message. Normal jobs
+without a reliable epoch also retain an unknown-time fallback.
 
-### `EventQueue.h`
+## Storage and TLS
 
-A fixed-size single-producer/single-consumer ring buffer:
+`PersistentStore` validates versioned LittleFS records and maintains temporary and
+backup files. The current v4 record is 996 bytes, with migration from the 900-byte
+v3 format. The record includes session, delivery jobs and offline summary state.
 
-- producer: D5 ISR;
-- consumer: main loop;
-- no heap allocation;
-- one slot intentionally reserved to distinguish full from empty;
-- dropped-edge counter when the queue is full.
+`TlsManager` requires a valid clock and the LittleFS certificate store.
+`NtfyClient` uses ESP8266HTTPClient/BearSSL with connection reuse and certificate
+verification. Its idle interval stays in the 32-bit `millis()` domain, avoiding
+premature socket closure after rollover. Notification bodies remain text; optional
+static click/action links do not implement a camera API.
 
-### `BellDetector.h` and `BellDetector.cpp`
-
-Responsibilities:
-
-- configure D5 as an externally pulled-up input;
-- attach a `CHANGE` interrupt;
-- capture level and `micros()` timestamp in the ISR;
-- preserve queued edge occurrence times;
-- classify the electrical pulse;
-- emit high-level events;
-- resynchronize against the physical D5 level if an edge is lost;
-- expose status and counters to diagnostics.
-
-### `Diagnostics.h` and `Diagnostics.cpp`
-
-Stage 1 diagnostics plus:
-
-- initial D5 level;
-- detector state in each heartbeat;
-- bell event logs;
-- raw, valid, short, long, dropped, and resynchronization counters;
-- microsecond duration output for rejected short pulses;
-- a longer LED pulse for valid bell events.
-
-## Detector state machine
-
-```text
-BOOT_WAIT
-  wait 5 seconds
-  |
-  v
-WAITING_FOR_STABLE_LOW
-  require LOW for 2 seconds
-  |
-  v
-ARMED
-  LOW -> HIGH
-  |
-  v
-HIGH_IN_PROGRESS
-  |-- HIGH -> LOW before 80 ms ------> SHORT_IGNORED
-  |-- HIGH -> LOW at 80 ms..15 s ----> VALID_PRESS
-  |-- HIGH remains >15 s ------------> HIGH_TOO_LONG
-  |
-  v
-WAITING_FOR_REARM
-  require LOW for 100 ms
-  |-- HIGH before 100 ms ------------> HIGH_DURING_REARM
-  |                                      |-- return LOW: restart 100 ms rearm
-  |                                      |-- remain HIGH >15 s: HIGH_TOO_LONG
-  |
-  +-----------------------------------> ARMED
-```
-
-If the board starts while D5 is `HIGH`, it follows the input but never creates a bell event. It arms only after D5 later remains `LOW` for two full seconds.
-
-A `HIGH` transition that starts before the 100 ms rearm interval completes is not counted as a new bell press. It enters `HIGH_DURING_REARM`, where it is ignored as a press but still timed. This prevents contact bounce from becoming a duplicate bell while ensuring a disconnected input or other abnormal `HIGH` lasting more than 15 seconds is still reported.
-
-## ISR path
-
-```text
-D5 changes
-└── ISR
-    ├── read D5
-    ├── read micros()
-    └── push raw edge into fixed queue
-```
-
-The ISR deliberately does not:
-
-- print to Serial;
-- allocate memory;
-- access LittleFS;
-- parse JSON;
-- connect to Wi-Fi;
-- call Imou or ntfy.
-
-## Main-loop path
-
-```text
-loop()
-├── BellDetector::tick()
-│   ├── consume dropped-edge count
-│   ├── drain raw edge queue
-│   ├── reconstruct edge occurrence time
-│   ├── update state machine
-│   ├── verify physical D5 level
-│   └── process timed transitions
-├── drain high-level bell events
-├── Diagnostics::tick()
-└── yield()
-```
-
-## Deferred responsibilities
-
-Stage 2 intentionally excludes:
-
-- bell sessions and cumulative notification counts;
-- Wi-Fi and NTP;
-- LittleFS persistence;
-- ntfy notifications;
-- offline detection and delayed reports;
-- Imou authentication and snapshots;
-- image downloads and attachments;
-- TLS certificate management.
-
-These responsibilities are planned together for Stage 3 after Stage 2 has been validated on the real COMMAX installation.
+Operational logs identify a notification sequence rather than printing its private
+topic path. Serial commands provide network diagnostics; the current firmware
+does not expose an inbound diagnostic server or OTA update service.
