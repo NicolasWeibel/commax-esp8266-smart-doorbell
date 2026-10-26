@@ -8,7 +8,7 @@ namespace AppConfig {
 
 // Firmware identity
 constexpr char kFirmwareName[] = "COMMAX ESP8266 Smart Doorbell";
-constexpr char kFirmwareVersion[] = "1.0.0-rc17-production-text-only-natural-time";
+constexpr char kFirmwareVersion[] = "1.0.0-stage3-rc1";
 constexpr char kImplementationStage[] =
     "Production candidate - quieter diagnostics, DHCP-only networking, and reliable text-only delivery";
 

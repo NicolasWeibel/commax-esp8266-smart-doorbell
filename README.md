@@ -9,7 +9,7 @@ This is an independent, unofficial project and is not affiliated with COMMAX.
 
 The latest published, hardware-tested release is **Stage 2 (`v0.2.0-stage2`)**.
 The `stage-3-complete-firmware` branch contains the connected firmware candidate:
-`1.0.0-rc17-production-text-only-natural-time`.
+`1.0.0-stage3-rc1`.
 
 The corrected connected base has been tested over USB and with a real COMMAX.
 The candidate with local-time notification text has passed automated tests and

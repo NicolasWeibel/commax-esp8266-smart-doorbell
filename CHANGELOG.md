@@ -3,7 +3,7 @@
 Published stages are retained below. Intermediate, unpublished development
 iterations are summarized in the current candidate rather than listed as releases.
 
-## 1.0.0-rc17-production-text-only-natural-time
+## 1.0.0-stage3-rc1
 
 **Stage 3 candidate; not yet published or hardware-validated in this exact build.**
 

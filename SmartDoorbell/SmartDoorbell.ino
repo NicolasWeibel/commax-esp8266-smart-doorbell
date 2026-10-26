@@ -3,7 +3,7 @@
 #if __has_include("Secrets.h")
 #include "Secrets.h"
 #else
-#error "Copy Secrets.example.h to Secrets.h and configure private values before compiling RC17."
+#error "Copy Secrets.example.h to Secrets.h and configure private values before compiling."
 #endif
 
 #include "AppConfig.h"
@@ -239,7 +239,7 @@ void setup() {
 
   controller.begin();
   diagnostics.log(LogLevel::Info,
-                  F("RC17 production text-only initialization completed."));
+                  F("Stage 3 candidate initialization completed."));
   Serial.println(F("[INFO] CONSOLE | escribi help para ver comandos"));
 }
 

@@ -2,7 +2,7 @@
 
 ## Candidate
 
-Firmware: `1.0.0-rc17-production-text-only-natural-time`.
+Firmware: `1.0.0-stage3-rc1`.
 Development branch: `stage-3-complete-firmware`.
 
 This is a Stage 3 candidate, not a claim of a new stable release. The natural-time
@@ -18,7 +18,7 @@ and any published candidate marked as a pre-release until its hardware check.
 | ntfy idle clock | Before, across and after `millis()` rollover, including exact zero; isolated timer test passed. |
 | Publication check | Passed on a public source export without private configuration. |
 | ESP8266 compilation | Complete sketch passed with Core 3.1.2, D1 mini, 160 MHz and 4M2M; no compiler warnings/errors in the recorded build. |
-| Source-only cleanup | No firmware-module changes are intended; documentation and test organization are validated separately. |
+| Release identity | Firmware version, boot text and public documentation aligned with Stage 3 RC1; bell/delivery logic unchanged. |
 
 The host environment substitutes Arduino APIs and the local-clock formatting
 service. It does not establish real NTP, HTTP/TLS delivery or physical signal quality.
@@ -47,11 +47,12 @@ may change build size slightly.
 
 | Resource | Corrected base | Natural-time candidate |
 | --- | ---: | ---: |
-| Static RAM | 40632 B | 40796 B |
+| Static RAM | 40632 B | 40748 B |
 | IRAM, including reserved instruction cache | 61239 B | 61239 B |
-| Code in flash | 465204 B | 465024 B |
+| Code in flash | 465204 B | 465016 B |
 
-The format change adds 164 bytes of static RAM with unchanged IRAM. Runtime heap
+The candidate adds 116 bytes of static RAM relative to the corrected base,
+including its current version/diagnostic strings, with unchanged IRAM. Runtime heap
 and restart behavior of the exact candidate remain hardware observations to make;
 the compilation figures alone do not establish them.
 
