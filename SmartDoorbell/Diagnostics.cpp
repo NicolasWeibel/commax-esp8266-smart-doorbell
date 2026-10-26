@@ -268,7 +268,18 @@ void Diagnostics::printBootReport() {
   Serial.print(F("Rearm: "));
   Serial.print(AppConfig::kRearmLowStableMs);
   Serial.println(F("ms stable LOW."));
-  Serial.println(F("Wi-Fi, LittleFS, Imou, and ntfy are not active yet."));
+  Serial.print(F("Session timing: first window="));
+  Serial.print(AppConfig::kFirstWindowMs / 1000U);
+  Serial.print(F("s, inactivity reset="));
+  Serial.print(AppConfig::kSessionSilenceTimeoutMs / 1000U);
+  Serial.print(F("s, counter review="));
+  Serial.print(AppConfig::kNotificationUpdateIntervalMs / 1000U);
+  Serial.println(F("s."));
+  Serial.println(F("Connected services: Wi-Fi, NTP, LittleFS, and ntfy text-only."));
+  Serial.println(F("TLS verification requires a LittleFS certificate store."));
+  if (ESP.getCpuFreqMHz() < 160U) {
+    Serial.println(F("[WARN] CONFIG | 160 MHz CPU is recommended for TLS."));
+  }
   Serial.println(F("=================================================="));
   Serial.println();
 }

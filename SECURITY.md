@@ -20,12 +20,8 @@ A useful report includes:
 
 - `SmartDoorbell/Secrets.h`;
 - Wi-Fi SSID and password;
-- Imou App ID when treated as private configuration;
-- Imou App Secret;
-- Imou access tokens;
 - private ntfy topic names;
 - real device and channel identifiers;
-- temporary signed snapshot URLs;
 - private IP addresses or network topology;
 - photographs from the installation;
 - unsanitized serial logs or API responses.
@@ -42,8 +38,8 @@ A useful report includes:
 
 ## Device security model
 
-The planned firmware will make outbound HTTPS connections only. It should not expose a web server, open router ports, or disable TLS verification in production. Camera and notification failures must not disable local bell detection.
+The planned firmware will make outbound HTTPS connections only. It should not expose a web server, open router ports, or disable TLS verification in production. Notification failures must not disable local bell detection.
 
 ## Privacy
 
-Doorbell events and entrance images may reveal presence, routines, and visitors. Keep topic identifiers private, minimize data retention, and do not publish real snapshots or event logs.
+Doorbell events may reveal presence and routines. Keep topic identifiers private, minimize data retention, and do not publish real event logs.

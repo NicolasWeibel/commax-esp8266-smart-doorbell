@@ -1,129 +1,120 @@
 # COMMAX ESP8266 Smart Doorbell
 
-An open-source ESP8266 firmware project that adds smart notifications and camera snapshots to a classic two-wire COMMAX intercom without replacing the original indoor unit.
+ESP8266 firmware that adds text notifications to a classic two-wire COMMAX
+intercom through an isolated PC817 input, while retaining the original handset.
 
-> This is an independent, unofficial project. It is not affiliated with or endorsed by COMMAX.
+This is an independent, unofficial project and is not affiliated with COMMAX.
 
 ## Project status
 
-The latest hardware-tested release is **Stage 1 (`v0.1.0-stage1`)**. This branch contains the **Stage 2 implementation candidate (`0.2.0-stage2`)**, which adds isolated bell input detection and must be validated on the target hardware before it is merged into `main` and tagged.
+The latest published, hardware-tested release is **Stage 2 (`v0.2.0-stage2`)**.
+The `stage-3-complete-firmware` branch contains the connected firmware candidate:
+`1.0.0-rc17-production-text-only-natural-time`.
 
-Stage 2 provides:
+The corrected connected base has been tested over USB and with a real COMMAX.
+The candidate with local-time notification text has passed automated tests and
+ESP8266 compilation; its final hardware check is pending. See
+[Validation](docs/VALIDATION.md) for the distinction and measured resources.
 
-- D5/GPIO14 input using the external 10 kΩ pull-up;
-- active-HIGH bell signal handling (`LOW` idle, `HIGH` active);
-- interrupt-driven edge capture;
-- a fixed-size ISR-safe raw edge queue;
-- a non-blocking bell detector state machine;
-- a 5-second startup grace period;
-- arming only after 2 seconds of stable `LOW`;
-- rejection of pulses shorter than 80 ms;
-- valid bell pulses from 80 ms through 15 seconds;
-- classification of `HIGH` periods longer than 15 seconds as abnormal;
-- rearming after 100 ms of stable `LOW`;
-- detection of abnormal long `HIGH` periods even when they begin before rearming completes;
-- microsecond diagnostics for rejected short pulses;
-- input resynchronization and queue-overflow diagnostics;
-- a 300 ms built-in LED pulse after each valid bell event;
-- host-side state-machine tests for the core detection scenarios.
+## Features
 
-Wi-Fi, ntfy, Imou, LittleFS, and persistent offline reporting remain disabled in this stage.
+- Interrupt-driven D5/GPIO14 capture with an external 10 kOhm pull-up.
+- Active-HIGH pulses: LOW at rest; a valid bell is confirmed on return to LOW.
+- Fixed-capacity queues, pulse filtering, startup stabilization and rearming.
+- Verified HTTPS text notifications through ntfy, with reusable TLS connections.
+- A 60-second initial notification window, cumulative updates and insistence.
+- A new occasion after 120 seconds without a valid bell.
+- Wi-Fi/DHCP recovery and one persistent summary for undelivered offline events.
+- NTP-based local time and last-bell time/date in Spanish notification messages.
+- LittleFS persistence with certificate verification and restart recovery.
+- Serial diagnostics and aggregated repeated Wi-Fi outage logs.
 
-## Target hardware
-
-- Wemos D1 mini or compatible ESP8266 board
-- Classic two-wire COMMAX intercom
-- PC817 optocoupler module
-- 10 kΩ external pull-up resistor
-
-The target optocoupler output wiring is:
+Example messages:
 
 ```text
-Wemos 3V3 ── 10 kΩ ──┬── D5 / GPIO14
-                       └── PC817 output V1
-
-Wemos GND ─────────────── PC817 output G
+Tocaron el timbre a las 16:42.
+Tocaron el timbre 3 veces en el último minuto. La última fue a las 16:43.
+Mientras estuvo sin conexión, tocaron el timbre 3 veces en una sola ocasión. La última fue ayer a las 22:37.
 ```
 
-The optocoupler input side and Wemos ground must remain isolated when the channel isolation jumper is removed.
+If an event's time cannot be determined reliably, the message says so. This
+candidate has no camera/image integration, OTA updater or remote diagnostic
+server. Optional static notification links can be configured in `Secrets.h`.
 
-## Requirements
+## Hardware and requirements
 
-- Arduino IDE 2.x
-- ESP8266 Arduino Core 3.1.2
-- Board profile: `LOLIN(WEMOS) D1 R2 & mini`
-- Serial monitor: `115200` baud
+- Wemos D1 mini or compatible ESP8266 board.
+- PC817 module and external 10 kOhm pull-up, wired as in [Hardware](docs/HARDWARE.md).
+- Arduino IDE 2.x and ESP8266 Arduino Core **3.1.2**.
+- Board: `LOLIN(WEMOS) D1 R2 & mini`; CPU: **160 MHz**.
+- Flash layout: **4 MB with 2 MB LittleFS (4M2M)** for the validated installation.
+- Serial monitor: **115200 baud**; 2.4 GHz Wi-Fi with DHCP.
 
-No external Arduino libraries are required for Stage 2.
+## Build and installation
 
-## Quick start
+1. Read the wiring and isolation instructions in [Hardware](docs/HARDWARE.md).
+2. Copy `SmartDoorbell/Secrets.example.h` to `SmartDoorbell/Secrets.h` and set your
+   private Wi-Fi, ntfy and POSIX timezone values. `ART3` is UTC-3 year-round.
+3. Open `SmartDoorbell/SmartDoorbell.ino` and select the board settings above.
+4. On a new device, generate the certificate store with
+   `tools/generate_cert_store.ps1` and provision it in LittleFS before using TLS.
+5. Compile and upload the sketch. On an existing installation, preserve its flash
+   layout and LittleFS; do not erase all flash or upload the filesystem again
+   merely to update the sketch when the certificate store is already valid.
+6. Confirm the detector is armed at LOW, time has synchronized and connectivity
+   is ONLINE. Follow [Testing](docs/TESTING.md) for physical and software checks.
 
-1. Open `SmartDoorbell/SmartDoorbell.ino` in Arduino IDE.
-2. Select `LOLIN(WEMOS) D1 R2 & mini`.
-3. Select the correct serial port.
-4. Verify and upload the sketch.
-5. Open the serial monitor at `115200` baud.
-6. Start with D5 held at `LOW` through the optocoupler or a safe test jumper.
-7. Reset the board and wait for `DETECTOR | ARMED`.
-8. Generate a `LOW -> HIGH -> LOW` pulse lasting between 80 ms and 15 seconds.
+The currently installed firmware needs one USB upload to receive this candidate.
+It cannot be updated remotely with the software presently installed.
 
-Expected output includes:
+## Automated checks
 
-```text
-Firmware: COMMAX ESP8266 Smart Doorbell 0.2.0-stage2
-[INFO] INPUT | initial_D5=LOW
-[INFO] DETECTOR | boot_wait_finished | D5=LOW | waiting_for_stable_LOW=2000ms
-[INFO] DETECTOR | ARMED | D5=LOW | valid_presses=0
-[INFO] BELL | pulse_started | LOW->HIGH
-[INFO] BELL | VALID | duration=...ms | total=1
+Host tests need Python 3.9+ and a C++17 compiler:
+
+```bash
+bash tests/host/run_tests.sh
+python tests/host/check_ntfy_idle.py
 ```
 
-Read [Testing](docs/TESTING.md) before connecting the firmware to a real intercom.
+PowerShell users can run `./tests/host/run_tests.ps1`. See
+[Host tests](tests/host/README.md) for compiler options and coverage.
+
+Run the publication check on a source tree without private configuration:
+
+```bash
+python tests/static/check_release.py
+```
+
+The publication check deliberately rejects `Secrets.h`. Automated checks do not
+replace compilation for ESP8266 or the final physical test.
 
 ## Repository structure
 
 ```text
-commax-esp8266-smart-doorbell/
-├── SmartDoorbell/          Arduino sketch and firmware modules
-├── docs/                   Public architecture, hardware, testing, and roadmap
-├── tests/host/             Host-side bell detector tests
-├── .github/                Issue and pull request templates
-├── README.md
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-├── SECURITY.md
-├── LICENSE
-├── .gitignore
-├── .gitattributes
-└── .editorconfig
+SmartDoorbell/    Arduino sketch and firmware modules
+docs/            Current public architecture, hardware, testing and validation
+tests/host/      Current logic, message and clock-regression tests
+tests/static/    Publication and firmware-invariant checks
+tools/           Certificate provisioning and optional PC network probe
+.github/         Issue and pull request templates
 ```
 
-## Documentation
+Public documentation is maintained in English. Local setup guides, personal
+test reports, older candidate notes and build outputs are excluded from Git.
+
+## Documentation and releases
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Hardware and electrical safety](docs/HARDWARE.md)
 - [Testing](docs/TESTING.md)
+- [Validation status](docs/VALIDATION.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Contribution and release workflow](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
-## Security and privacy
-
-Never commit `SmartDoorbell/Secrets.h`, Wi-Fi credentials, Imou credentials, private ntfy topics, device identifiers, signed snapshot URLs, real entrance images, or unsanitized logs. `Secrets.example.h` contains placeholders only.
-
-See [SECURITY.md](SECURITY.md) for the complete policy.
-
-## Versioning
-
-The project uses stage-based pre-release versions while the architecture is being developed:
-
-```text
-v0.1.0-stage1  Stable firmware foundation
-v0.2.0-stage2  Bell input detection
-v1.0.0         Complete connected smart doorbell
-```
-
-The `main` branch should always contain the latest hardware-tested stage. Stage 2 development belongs on `stage-2-bell-detection` until validation is complete.
-
-## License
+Keep `main` on the latest hardware-tested stage. Develop Stage 3 on
+`stage-3-complete-firmware` and publish candidates as pre-releases until their
+hardware checks are complete. Never publish locally configured binaries,
+credentials, device identifiers or unsanitized logs.
 
 Released under the [MIT License](LICENSE).

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "AppConfig.h"
 #include "AppTypes.h"
 #include "EventQueue.h"
 
@@ -14,20 +15,26 @@ class BellDetector {
 
   bool popEvent(BellEvent& event);
   BellDetectorStatus status() const;
+  bool activityInFlight() const;
 
  private:
   static void IRAM_ATTR interruptThunk();
   void IRAM_ATTR captureEdgeFromIsr();
 
-  void processEdge(const EdgeEvent& edge, uint32_t edgeOccurredAtMs);
+  void processEdge(const EdgeEvent& edge,
+                   uint32_t edgeOccurredAtMs,
+                   bool timingReliable);
   void updateTimedTransitions(uint32_t nowMs, uint32_t nowUs);
   void startEligibleHighPulse(const EdgeEvent& edge,
-                              uint32_t edgeOccurredAtMs);
-  void startHighDuringRearm(const EdgeEvent& edge);
+                              uint32_t edgeOccurredAtMs,
+                              bool timingReliable);
+  void startHighDuringRearm(const EdgeEvent& edge,
+                            bool timingReliable);
   void finishHighPulse(uint32_t durationUs, uint32_t edgeOccurredAtMs);
   void finishHighDuringRearm(uint32_t durationUs,
                              uint32_t edgeOccurredAtMs);
   void reportHighTooLong(uint32_t occurredAtMs, uint32_t durationUs);
+  void discardUnreliableHigh(uint32_t occurredAtMs);
 
   void enterWaitingForStableLow(uint32_t nowMs);
   void enterWaitingForRearm(uint32_t nowMs);
@@ -56,6 +63,7 @@ class BellDetector {
   uint32_t lowStableSinceMs_ = 0;
   bool lowStableTracking_ = false;
   uint32_t highStartedUs_ = 0;
+  bool highTimingReliable_ = false;
 
   BellEvent events_[AppConfig::kBellEventQueueCapacity]{};
   uint8_t eventHead_ = 0;

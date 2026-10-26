@@ -1,89 +1,38 @@
 # Roadmap
 
-The project is developed in hardware-tested stages. The `main` branch should contain only the latest approved stage.
+The project advances through hardware-tested stages. Keep `main` on the latest
+validated stage and develop candidates on a dedicated branch.
 
-## Stage 1 — Firmware foundation and diagnostics
+## Released
 
-**Status: complete, hardware-tested, and released as `v0.1.0-stage1`**
+- **Stage 1 — `v0.1.0-stage1`:** firmware foundation, reset/memory diagnostics and
+  non-blocking status indication.
+- **Stage 2 — `v0.2.0-stage2`:** isolated D5 bell input, pulse filtering, arming,
+  rearming and detector diagnostics, tested with the real intercom.
 
-- minimal Arduino entry point;
-- centralized configuration;
-- shared base types;
-- serial boot report;
-- heartbeat and memory diagnostics;
-- non-blocking status LED pulse;
-- reset, power-cycle, and stability validation.
+## Current: Stage 3 connected firmware candidate
 
-## Stage 2 — Bell input and pulse detector
+Implemented: text notifications, session grouping, retries, verified TLS, local
+time, restart persistence, Wi-Fi recovery and undelivered-event summaries.
+Automated tests and ESP8266 compilation passed. The corrected base has hardware
+evidence; the exact local-time candidate still needs its physical check.
 
-**Status: implementation complete; target hardware validation pending**
+Before promoting the candidate:
 
-- configure D5 with the external 10 kΩ pull-up;
-- capture optocoupler output edges through an interrupt;
-- use a fixed-size ISR-safe raw edge queue;
-- preserve edge timestamps when the main loop is delayed;
-- wait 5 seconds after boot;
-- require 2 seconds of stable `LOW` before arming;
-- accept `HIGH` pulses from 80 ms through 15 seconds;
-- classify longer `HIGH` periods as abnormal;
-- require 100 ms of stable `LOW` before rearming;
-- monitor an early `HIGH` during rearm and still classify it if it remains active for more than 15 seconds;
-- expose overflow, resynchronization, and pulse counters;
-- validate with direct D5 simulation, PC817, and the real COMMAX intercom.
+1. Load the candidate while preserving its flash layout and certificate store.
+2. Confirm a real bell notification and its local time, then a grouped update.
+3. Confirm offline recovery when practical and observe normal installed operation.
+4. Record the result in [Validation](VALIDATION.md), complete the PR and publish
+   the validated stage.
 
-## Stage 3 — Complete connected smart doorbell
+## Future work
 
-**Status: planned after Stage 2 approval**
+- Authenticated, signed OTA updates with a bounded maintenance window.
+- Restricted, authenticated diagnostics over the local network.
+- Additional persistence recovery and scheduling improvements only when justified
+  by a reproduced problem or a documented requirement.
 
-Stage 3 will combine all remaining functionality in one development branch and one final release. It will still be implemented through focused modules and commits.
-
-### Bell sessions
-
-- first-notification session;
-- cumulative bell counter;
-- notification counter checks every 10 seconds;
-- one-minute first-notification window;
-- separate maximum-priority insistence notification;
-- session reset after two minutes without a valid bell event.
-
-### Time and persistence
-
-- extended monotonic clock;
-- NTP time anchor;
-- LittleFS storage;
-- atomic offline counter persistence;
-- recovery after reset or power interruption;
-- exact, reconstructed, lower-bound, or unavailable event time states.
-
-### Wi-Fi, ntfy, and offline mode
-
-- Wi-Fi reconnection;
-- text and image notifications;
-- notification replacement by stable sequence identifier;
-- high and maximum priority channels;
-- connectivity state machine;
-- offline confirmation after repeated failures over approximately 30 seconds;
-- active-session removal when offline is confirmed;
-- persistent offline bell count;
-- delayed summary after connectivity recovery.
-
-### Imou snapshots
-
-- access-token acquisition, caching, and renewal;
-- enhanced snapshot request;
-- measured initial availability delay;
-- text-first fallback when an image is delayed;
-- download to LittleFS without buffering the full JPG in RAM;
-- standard snapshot fallback for invalid enhanced URLs;
-- camera-offline, temporary API, and quota error handling;
-- image attachment reuse for later counter updates.
-
-### Secure integration
-
-- one HTTPS operation at a time;
-- network job scheduling around notification deadlines;
-- TLS certificate verification;
-- continued interrupt-based D5 capture during network operations;
-- full session, camera-failure, offline, reset, and recovery tests;
-- 48 to 72-hour final stability validation;
-- release as `v1.0.0` after complete hardware approval.
+These features are proposals, not capabilities of the installed firmware. OTA
+and remote diagnostics require an initial physical firmware upload and their
+own resource, security and hardware validation. Camera/image integration remains
+outside the current text-only release scope.
